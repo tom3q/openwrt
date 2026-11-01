@@ -1,0 +1,36 @@
+From: Tomasz Figa <tomasz.figa@gmail.com>
+Subject: [PATCH 3/3] net: dsa: qca8k: disable MAC-level LPI on all ports during setup
+
+On QCA8337 switches, the hardware power-on reset default of the
+QCA8K_REG_EEE_CTRL register (0x0100) is 0x00001550, which has MAC LPI
+enabled on all internal ports (ports 1 through 5).
+
+Because DSA and phylink do not invoke .set_mac_eee() at switch probe time
+or port creation, the MAC-level LPI bits remain set to their reset defaults
+until user space explicitly configures EEE via ethtool. On ports where EEE
+is unsupported, disabled in Device Tree, or disabled at the PHY layer, this
+results in the switch MAC attempting LPI signaling while the link partner
+or PHY does not expect it.
+
+Explicitly clear the LPI enable bits in QCA8K_REG_EEE_CTRL for all user
+ports during qca8k_setup() so that ports start in a known, consistent
+non-LPI state until explicitly enabled.
+
+Fixes: 6b93fb664fb2 ("net-next: dsa: add new driver for QCA8K")
+Signed-off-by: Tomasz Figa <tomasz.figa@gmail.com>
+---
+--- a/drivers/net/dsa/qca/qca8k-8xxx.c
++++ b/drivers/net/dsa/qca/qca8k-8xxx.c
+@@ -2012,6 +2012,12 @@ qca8k_setup(struct dsa_switch *ds)
+ 				QCA8K_PORT_LOOKUP_MEMBER, 0);
+ 		if (ret)
+ 			return ret;
++
++		/* Disable EEE LPI by default on all ports */
++		ret = qca8k_rmw(priv, QCA8K_REG_EEE_CTRL,
++				QCA8K_REG_EEE_CTRL_LPI_EN(dp->index), 0);
++		if (ret)
++			return ret;
+ 	}
+ 
+ 	/* Disable MAC by default on all user ports */

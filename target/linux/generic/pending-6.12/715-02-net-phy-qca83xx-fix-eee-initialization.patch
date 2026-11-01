@@ -1,0 +1,34 @@
+From: Tomasz Figa <tomasz.figa@gmail.com>
+Subject: [PATCH 2/3] net: phy: qca83xx: mark EEE disabled in phylib when clearing advertisement
+
+On QCA8327/QCA8337 switch revision 2 silicon, qca83xx_config_init() disables
+EEE advertisement by clearing the MDIO_AN_EEE_ADV register (MMD 7, 0x003c)
+to 0x0.
+
+However, during phy_probe(), genphy_c45_read_eee_adv() reads the hardware
+reset default (0x0006) and sets phydev->eee_enabled = true. Because
+qca83xx_config_init() only cleared the hardware register without clearing
+phydev->eee_enabled, subsequent calls to genphy_c45_an_config_eee_aneg()
+during auto-negotiation configuration check phydev->eee_enabled and write
+phydev->advertising_eee (0x0006) right back into MDIO_AN_EEE_ADV.
+
+This leaves the PHY advertising EEE over the wire despite the driver's
+intent to disable it on revision 2 silicon, leading to link instability and
+receiver loss with link partners that enter LPI.
+
+Explicitly set phydev->eee_enabled = false in case 2 of qca83xx_config_init()
+so genphy_c45_an_config_eee_aneg() preserves the zeroed advertisement.
+
+Fixes: 6b93fb664fb2 ("net-next: dsa: add new driver for QCA8K")
+Signed-off-by: Tomasz Figa <tomasz.figa@gmail.com>
+---
+--- a/drivers/net/phy/qcom/qca83xx.c
++++ b/drivers/net/phy/qcom/qca83xx.c
+@@ -109,6 +109,7 @@ static int qca83xx_config_init(struct ph
+ 		break;
+ 
+ 	case 2:
++		phydev->eee_enabled = false;
+ 		phy_write_mmd(phydev, MDIO_MMD_AN, MDIO_AN_EEE_ADV, 0x0);
+ 		fallthrough;
+ 	case 4:
